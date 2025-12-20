@@ -105,12 +105,21 @@ const Chat = () => {
             }
         };
 
+        // 💡 NEW: Handle One-Time User Status Changes
+        const handleStatusChange = ({ userId, status }) => {
+            setAllUsers(prevUsers => prevUsers.map(u =>
+                u._id === userId ? { ...u, isOnline: status === 'online' } : u
+            ));
+        };
+
         socket.on('user-typing', handleTyping);
         socket.on('user-stopped-typing', handleStoppedTyping);
+        socket.on('user-status-change', handleStatusChange);
 
         return () => {
             socket.off('user-typing', handleTyping);
             socket.off('user-stopped-typing', handleStoppedTyping);
+            socket.off('user-status-change', handleStatusChange);
         };
     }, [socket, chatTarget]);
 
@@ -121,7 +130,7 @@ const Chat = () => {
         const handleReceiveMessage = (newMessage) => {
             console.log('📨 Message received in FE:', newMessage);
 
-            // Check if message belongs to the current chat
+            // A. Update current active chat messages
             if (chatTarget) {
                 const isForCurrentChat =
                     (newMessage.sender?._id === chatTarget._id || newMessage.sender === chatTarget._id) ||
@@ -136,6 +145,28 @@ const Chat = () => {
                     setIsTyping(false);
                 }
             }
+
+            // B. Update Chat List Preview (Dynamic "WhatsApp-like" behavior)
+            setAllUsers(prevUsers => {
+                return prevUsers.map(user => {
+                    const isSender = (newMessage.sender?._id || newMessage.sender) === user._id;
+                    const isReceiver = (newMessage.receiver?._id || newMessage.receiver) === user._id;
+
+                    if (isSender || isReceiver) {
+                        return {
+                            ...user,
+                            lastMessage: newMessage.content || 'Photo',
+                            lastMessageTime: newMessage.createdAt
+                        };
+                    }
+                    return user;
+                    // Optional: You could sort here to move the updated user to the top
+                }).sort((a, b) => {
+                    const timeA = new Date(a.lastMessageTime || 0);
+                    const timeB = new Date(b.lastMessageTime || 0);
+                    return timeB - timeA; // Sort descending
+                });
+            });
         };
 
         socket.on('receive-message', handleReceiveMessage);
@@ -302,10 +333,21 @@ const Chat = () => {
                             className={`chat-list-item ${chatTarget?._id === targetUser._id ? 'active' : ''}`}
                             onClick={() => selectChatTarget(targetUser)}
                         >
-                            <div className="chat-avatar">{getInitials(targetUser.username)}<span className="online-indicator"></span></div>
+                            <div className="chat-avatar">
+                                {getInitials(targetUser.username)}
+                                {/* 💡 Dynamic Online Indicator */}
+                                {targetUser.isOnline && <span className="online-indicator"></span>}
+                            </div>
                             <div className="chat-info">
                                 <div className="chat-name">{targetUser.username}</div>
-                                <div className="chat-preview">Click to chat</div>
+                                {/* 💡 Dynamic Last Message Preview */}
+                                <div className="chat-preview">
+                                    {targetUser.lastMessage || 'Click to chat'}
+                                </div>
+                            </div>
+                            <div className="chat-time">
+                                {/* 💡 Dynamic Time */}
+                                {targetUser.lastMessageTime ? formatTime(targetUser.lastMessageTime) : ''}
                             </div>
                         </motion.div>
                     ))}
