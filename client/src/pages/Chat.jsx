@@ -336,6 +336,46 @@ const Chat = () => {
         u.username.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
+    // --- UTILITY ---
+    const createEmojiWallpaper = (emoji) => {
+        if (!emoji) return 'none';
+        // Create a subtle SVG pattern with the user's emoji
+        const svg = `
+            <svg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'>
+                <text x='40' y='40' dominant-baseline='middle' text-anchor='middle' font-size='24' opacity='0.05' font-family='Arial'>
+                    ${emoji}
+                </text>
+            </svg>
+        `.trim().replace(/\s+/g, ' '); // Minify slightly
+        return `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}")`;
+    };
+
+    // State for Profile Editing
+    const [isEditingEmoji, setIsEditingEmoji] = useState(false);
+    const [selectedEmoji, setSelectedEmoji] = useState(user?.avatar || '😎');
+
+    const handleUpdateProfile = async (newEmoji) => {
+        try {
+            const config = { headers: { Authorization: `Bearer ${token}` } };
+            const response = await axios.put(`${ENDPOINT}/api/users/profile`, {
+                avatar: newEmoji,
+                avatarType: 'emoji'
+            }, config);
+
+            // Update local storage and state
+            const updatedUser = { ...user, avatar: newEmoji };
+            localStorage.setItem('userInfo', JSON.stringify({ ...updatedUser, token })); // Keep token
+            dispatch({ type: 'LOGIN_SUCCESS', payload: { ...updatedUser, token } });
+
+            setIsEditingEmoji(false);
+        } catch (error) {
+            console.error('Failed to update profile:', error);
+            alert('Failed to update emoji.');
+        }
+    };
+
+    const emojis = ['😎', '👻', '🤖', '👽', '💀', '🤡', '👹', '👺', '💩', '😺', '🐵', '🐶', '🐺', '🦊', '🐯', '🦁', '🦄', '🐝', '🐛', '🦋', '🐌', '🐞', '🐜', '🕷', '🕸', '🐢', '🐍', '🦎', '🦖', '🦕'];
+
     return (
         <div className="chat-app-container">
             {/* 💡 PROFILE MODAL OVERLAY */}
@@ -352,24 +392,52 @@ const Chat = () => {
                             onClick={(e) => e.stopPropagation()}
                         >
                             <div className="profile-header">
-                                <h2>Profile</h2>
+                                <h2>Profile & Settings</h2>
                                 <button className="close-btn" onClick={() => setIsProfileOpen(false)}>×</button>
                             </div>
                             <div className="profile-body">
-                                <div className="profile-avatar-large">
-                                    {getInitials(user?.username)}
-                                </div>
-                                <div className="profile-detail">
-                                    <label>Your Name</label>
-                                    <p>{user?.username}</p>
-                                </div>
-                                <div className="profile-detail">
-                                    <label>Email / ID</label>
-                                    <p>{user?.email}</p>
-                                </div>
-                                <div className="profile-status">
-                                    <span className="status-dot online"></span> Active
-                                </div>
+                                {!isEditingEmoji ? (
+                                    <>
+                                        <motion.div whileHover={{ scale: 1.1 }} className="profile-avatar-large" style={{ fontSize: '64px' }}>
+                                            {user?.avatarType === 'emoji' ? user.avatar : getInitials(user?.username)}
+                                        </motion.div>
+
+                                        <div className="profile-detail">
+                                            <label>Name</label>
+                                            <p>{user?.username}</p>
+                                        </div>
+                                        <div className="profile-detail">
+                                            <label>Theme Emoji</label>
+                                            <div style={{ fontSize: '24px', opacity: 0.7 }}>{user?.avatar}</div>
+                                        </div>
+
+                                        <div className="button-group-vertical" style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                                            <button className="primary-btn-outline" onClick={() => setIsEditingEmoji(true)} style={{ padding: '10px', borderRadius: '8px', border: '1px solid #667eea', background: 'transparent', color: '#667eea', cursor: 'pointer', fontWeight: 'bold' }}>
+                                                Change Theme Emoji
+                                            </button>
+                                            <button className="logout-btn-full" onClick={handleLogout} style={{ padding: '10px', borderRadius: '8px', border: 'none', background: '#e53e3e', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>
+                                                Logout
+                                            </button>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="emoji-picker-profile">
+                                        <h4>Pick a theme emoji</h4>
+                                        <div className="avatar-picker" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', maxHeight: '300px', overflowY: 'auto' }}>
+                                            {emojis.map(emoji => (
+                                                <button
+                                                    key={emoji}
+                                                    onClick={() => handleUpdateProfile(emoji)}
+                                                    className="emoji-btn"
+                                                    style={{ fontSize: '24px', padding: '10px', border: '1px solid #ddd', borderRadius: '8px', cursor: 'pointer', background: user?.avatar === emoji ? '#e2e8f0' : 'white' }}
+                                                >
+                                                    {emoji}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <button onClick={() => setIsEditingEmoji(false)} style={{ marginTop: '16px', color: '#718096', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Cancel</button>
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     </motion.div>
@@ -382,10 +450,11 @@ const Chat = () => {
                     <div className="header-title-row">
                         {/* 💡 Clickable Avatar for Profile */}
                         <div className="user-avatar-small" onClick={() => setIsProfileOpen(true)} title="View Profile" style={{ cursor: 'pointer', marginRight: '10px', width: '35px', height: '35px', borderRadius: '50%', background: '#3182ce', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                            {getInitials(user?.username)}
+                            {user?.avatarType === 'emoji' ? user.avatar : getInitials(user?.username)}
                         </div>
                         <h2>Chats</h2>
-                        <button className="more-btn" onClick={handleLogout} title="Logout"><FaSignOutAlt /></button>
+                        {/* Removed duplicate logout button here, kept in profile */}
+                        <button className="more-btn" onClick={() => setIsProfileOpen(true)} title="Settings"><FaEllipsisH /></button>
                     </div>
                     <div className="search-box">
                         <FaSearch />
@@ -407,19 +476,17 @@ const Chat = () => {
                             onClick={() => selectChatTarget(targetUser)}
                         >
                             <div className="chat-avatar">
-                                {getInitials(targetUser.username)}
-                                {/* 💡 Dynamic Online Indicator */}
+                                {/* Use emoji if available, else initials */}
+                                {targetUser.avatarType === 'emoji' && targetUser.avatar ? targetUser.avatar : getInitials(targetUser.username)}
                                 {targetUser.isOnline && <span className="online-indicator"></span>}
                             </div>
                             <div className="chat-info">
                                 <div className="chat-name">{targetUser.username}</div>
-                                {/* 💡 Dynamic Last Message Preview */}
                                 <div className="chat-preview">
                                     {targetUser.lastMessage || 'Click to chat'}
                                 </div>
                             </div>
                             <div className="chat-time">
-                                {/* 💡 Dynamic Time */}
                                 {targetUser.lastMessageTime ? formatTime(targetUser.lastMessageTime) : ''}
                             </div>
                         </motion.div>
@@ -433,7 +500,7 @@ const Chat = () => {
                     <div className="no-chat-selected">
                         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
                             <FaComments size={64} style={{ color: '#cbd5e0' }} />
-                            <h3>Welcome to PINSTAGRAM</h3>
+                            <h3>Welcome {user?.username}</h3>
                             <p>Select a conversation to start messaging</p>
                         </motion.div>
                     </div>
@@ -441,13 +508,22 @@ const Chat = () => {
                     <>
                         <div className="chat-area-header">
                             <div className="header-user-info">
-                                <div className="chat-avatar large">{getInitials(chatTarget.username)}<span className="online-indicator"></span></div>
+                                <div className="chat-avatar large">
+                                    {chatTarget.avatarType === 'emoji' && chatTarget.avatar ? chatTarget.avatar : getInitials(chatTarget.username)}
+                                    <span className="online-indicator"></span>
+                                </div>
                                 <div><h3>{chatTarget.username}</h3><div className="status-text">{chatTarget.isOnline ? 'Online' : 'Offline'}</div></div>
                             </div>
                             <button className="more-btn"><FaEllipsisH size={20} /></button>
                         </div>
 
-                        <div className="messages-container">
+                        {/* 💡 Messages Container with Dynamic Emoji Wallpaper */}
+                        <div
+                            className="messages-container"
+                            style={{
+                                backgroundImage: createEmojiWallpaper(user?.avatar || '😎'), // 💡 APPLY WALLPAPER
+                            }}
+                        >
                             <AnimatePresence>
                                 {messages.map((msg, index) => {
                                     const isSent = msg.sender?._id === user._id || msg.sender === user._id;

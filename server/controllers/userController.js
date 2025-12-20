@@ -115,7 +115,6 @@ const getRecentContacts = asyncHandler(async (req, res) => {
     const currentUserId = req.user._id;
 
     const recentConversations = await Message.aggregate([
-        // 1. Find messages involving the current user
         {
             $match: {
                 $or: [
@@ -124,9 +123,7 @@ const getRecentContacts = asyncHandler(async (req, res) => {
                 ]
             }
         },
-        // 2. Sort by date desc to get latest first
         { $sort: { createdAt: -1 } },
-        // 3. Group by the OTHER user ID
         {
             $group: {
                 _id: {
@@ -141,11 +138,8 @@ const getRecentContacts = asyncHandler(async (req, res) => {
                 messageType: { $first: "$messageType" }
             }
         },
-        // 4. Sort groups by the latest message time
         { $sort: { lastMessageTime: -1 } },
-        // 5. Limit to 4 recent chats
         { $limit: 4 },
-        // 6. Join with User collection to get details
         {
             $lookup: {
                 from: "users",
@@ -154,9 +148,7 @@ const getRecentContacts = asyncHandler(async (req, res) => {
                 as: "userDetails"
             }
         },
-        // 7. Unwind the array (lookup returns an array)
         { $unwind: "$userDetails" },
-        // 8. Project final format
         {
             $project: {
                 _id: "$userDetails._id",
@@ -167,7 +159,7 @@ const getRecentContacts = asyncHandler(async (req, res) => {
                 lastMessage: "$lastMessageContent",
                 lastMessageTime: "$lastMessageTime",
                 messageType: "$messageType",
-                isOnline: "$userDetails.isOnline" // Include online status if in Schema
+                isOnline: "$userDetails.isOnline"
             }
         }
     ]);
@@ -175,11 +167,43 @@ const getRecentContacts = asyncHandler(async (req, res) => {
     res.json(recentConversations);
 });
 
+// @desc    Update user profile
+// @route   PUT /api/users/profile
+// @access  Private
+const updateMyProfile = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user._id);
+
+    if (user) {
+        user.username = req.body.username || user.username;
+        user.email = req.body.email || user.email;
+        user.avatar = req.body.avatar || user.avatar;
+        user.avatarType = req.body.avatarType || user.avatarType;
+
+        if (req.body.password) {
+            user.password = req.body.password;
+        }
+
+        const updatedUser = await user.save();
+
+        res.json({
+            _id: updatedUser._id,
+            username: updatedUser.username,
+            email: updatedUser.email,
+            avatar: updatedUser.avatar,
+            avatarType: updatedUser.avatarType,
+            token: generateToken(updatedUser._id),
+        });
+    } else {
+        res.status(404);
+        throw new Error('User not found');
+    }
+});
 
 module.exports = {
     registerUser,
     authUser,
     getMyProfile,
     getAllUsers,
-    getRecentContacts // Export the new function
+    getRecentContacts,
+    updateMyProfile
 };
