@@ -17,13 +17,13 @@ const messageSchema = new mongoose.Schema({
     },
     messageType: {
         type: String,
-        enum: ['text', 'image', 'video', 'audio', 'pdf', 'file'], // ADDED more types
+        enum: ['text', 'image', 'file'], // ADDED more types
         default: 'text'
     },
     // ✨ NEW FIELDS FOR FILE UPLOADS
     fileUrl: {
         type: String,
-        default: null
+        default: ''
     },
     fileName: {
         type: String,

@@ -11,8 +11,8 @@ const connectDB = require('./config/db');
 const userRoutes = require('./routes/userRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 // 💡 NEW: Import the new upload routes and the specific error handlers
-const uploadRoutes = require('./routes/uploadRoutes'); 
-const { notFound, errorHandler } = require('./middleware/errorMiddleware'); 
+const uploadRoutes = require('./routes/uploadRoutes');
+const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 const User = require('./models/User'); // 💡 NEW: We need the User model here for offline status update
 
 const app = express();
@@ -22,7 +22,7 @@ const server = http.createServer(app);
 connectDB();
 
 // 🚨 DEPLOYMENT CHANGE: Determine allowed origins dynamically
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173'; 
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
 const allowedOrigins = [
     'http://localhost:5173',
@@ -33,7 +33,7 @@ const allowedOrigins = [
 
 // --- 1. CORS Configuration (More robust function for dynamic origins) ---
 app.use(cors({
-    origin: function(origin, callback) {
+    origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or local file access)
         if (!origin) return callback(null, true);
         if (allowedOrigins.includes(origin)) {
@@ -60,7 +60,7 @@ const io = new Server(server, {
 // --- 3. Middleware (Including new extended form parser) ---
 app.use(express.json());
 // 💡 NEW: express.urlencoded is essential for file uploads and complex form data
-app.use(express.urlencoded({ extended: true })); 
+app.use(express.urlencoded({ extended: true }));
 // app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // You'll need this for serving files later
 
 
@@ -86,7 +86,7 @@ io.on('connection', (socket) => {
         console.log('👤 User online:', userId);
         onlineUsers.set(userId, socket.id);
         socket.userId = userId;
-        
+
         // Update user status in DB
         await User.findByIdAndUpdate(userId, { isOnline: true })
             .catch(err => console.error('Error setting user online:', err));
@@ -96,7 +96,7 @@ io.on('connection', (socket) => {
             userId,
             status: 'online'
         });
-        
+
         console.log(`✅ User ${userId} is online. Total online: ${onlineUsers.size}`);
     });
 
@@ -116,21 +116,21 @@ io.on('connection', (socket) => {
     // Handle message sending
     socket.on('send-message', (message) => {
         console.log('📤 Message received by server:', message);
-        
+
         // Determine the receiver ID
         const receiverId = message.receiver?._id || message.receiver;
         const senderId = message.sender?._id || message.sender;
-        
+
         // Calculate room ID (same logic as frontend)
-        const roomId = senderId < receiverId 
-            ? `${senderId}_${receiverId}` 
+        const roomId = senderId < receiverId
+            ? `${senderId}_${receiverId}`
             : `${receiverId}_${senderId}`;
-        
+
         console.log('📨 Emitting to room:', roomId);
-        
+
         // Emit to room (both users in the conversation)
         io.to(roomId).emit('receive-message', message);
-        
+
         // Also try direct delivery to receiver if online
         const receiverSocketId = onlineUsers.get(receiverId);
         if (receiverSocketId) {
@@ -154,13 +154,21 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Message Read Receipt
+    socket.on('message-read', ({ senderId, receiverId }) => {
+        const senderSocketId = onlineUsers.get(senderId);
+        if (senderSocketId) {
+            io.to(senderSocketId).emit('message-read', { receiverId });
+        }
+    });
+
     // Handle disconnect
     socket.on('disconnect', () => {
         console.log('❌ User disconnected:', socket.id);
-        
+
         if (socket.userId) {
             onlineUsers.delete(socket.userId);
-            
+
             // Update user status in database
             User.findByIdAndUpdate(socket.userId, {
                 lastSeen: new Date(),
@@ -172,7 +180,7 @@ io.on('connection', (socket) => {
                 userId: socket.userId,
                 status: 'offline'
             });
-            
+
             console.log(`User ${socket.userId} went offline. Total online: ${onlineUsers.size}`);
         }
     });
@@ -187,7 +195,7 @@ app.get('/', (req, res) => {
 });
 
 // Error Middleware (Must be after all routes)
-app.use(notFound); 
+app.use(notFound);
 app.use(errorHandler);
 
 

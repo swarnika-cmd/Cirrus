@@ -1,7 +1,6 @@
-
 const express = require('express');
 const router = express.Router();
-const { sendMessage, getMessages } = require('../controllers/messageController');
+const { sendMessage, getMessages, markMessagesRead } = require('../controllers/messageController');
 const { protect } = require('../middleware/authMiddleware'); // We need protection for messages!
 
 // All message routes are private and must use the 'protect' middleware

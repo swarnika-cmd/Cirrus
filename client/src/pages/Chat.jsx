@@ -38,6 +38,7 @@ const Chat = () => {
     const [messageInput, setMessageInput] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const [isTyping, setIsTyping] = useState(false); // Validates if *other* user is typing
+    const [isProfileOpen, setIsProfileOpen] = useState(false); // 💡 Profile Modal State
 
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -79,6 +80,16 @@ const Chat = () => {
             if (user?._id) {
                 newSocket.emit('user-online', user._id);
             }
+        });
+
+        // 💡 NEW: Listen for read receipts
+        newSocket.on('message-read', ({ receiverId }) => {
+            // If we are chatting with the person who read our messages, update UI
+            setMessages(prev => prev.map(msg =>
+                msg.sender === user._id || msg.sender?._id === user._id
+                    ? { ...msg, isRead: true }
+                    : msg
+            ));
         });
 
         setSocket(newSocket);
@@ -123,11 +134,11 @@ const Chat = () => {
         };
     }, [socket, chatTarget]);
 
-    // 3. Listen for Messages
+    // 3. Listen for Messages & Auto-Mark Read
     useEffect(() => {
         if (!socket) return;
 
-        const handleReceiveMessage = (newMessage) => {
+        const handleReceiveMessage = async (newMessage) => {
             console.log('📨 Message received in FE:', newMessage);
 
             // A. Update current active chat messages
@@ -143,15 +154,23 @@ const Chat = () => {
                         return [...prev, newMessage];
                     });
                     setIsTyping(false);
+
+                    // 💡 NEW: If we are viewing this chat, mark as read immediately
+                    if (newMessage.sender?._id === chatTarget._id || newMessage.sender === chatTarget._id) {
+                        try {
+                            const config = { headers: { Authorization: `Bearer ${token}` } };
+                            await axios.put(`${ENDPOINT}/api/messages/read/${chatTarget._id}`, {}, config);
+                            socket.emit('message-read', { senderId: chatTarget._id, receiverId: user._id });
+                        } catch (err) { console.error("Error marking read:", err); }
+                    }
                 }
             }
 
-            // B. Update Chat List Preview (Dynamic "WhatsApp-like" behavior)
+            // B. Update Chat List Preview (Unchanged)
             setAllUsers(prevUsers => {
                 return prevUsers.map(user => {
                     const isSender = (newMessage.sender?._id || newMessage.sender) === user._id;
                     const isReceiver = (newMessage.receiver?._id || newMessage.receiver) === user._id;
-
                     if (isSender || isReceiver) {
                         return {
                             ...user,
@@ -160,18 +179,13 @@ const Chat = () => {
                         };
                     }
                     return user;
-                    // Optional: You could sort here to move the updated user to the top
-                }).sort((a, b) => {
-                    const timeA = new Date(a.lastMessageTime || 0);
-                    const timeB = new Date(b.lastMessageTime || 0);
-                    return timeB - timeA; // Sort descending
-                });
+                }).sort((a, b) => new Date(b.lastMessageTime || 0) - new Date(a.lastMessageTime || 0));
             });
         };
 
         socket.on('receive-message', handleReceiveMessage);
         return () => socket.off('receive-message', handleReceiveMessage);
-    }, [socket, chatTarget]);
+    }, [socket, chatTarget, token, user]); // Added token and user deps
 
     // Room Joining
     useEffect(() => {
@@ -227,6 +241,11 @@ const Chat = () => {
             const config = { headers: { Authorization: `Bearer ${token}` } };
             const response = await axios.get(`${ENDPOINT}/api/messages/${targetUser._id}`, config);
             setMessages(response.data);
+
+            // 💡 NEW: Mark messages as read when opening chat
+            await axios.put(`${ENDPOINT}/api/messages/read/${targetUser._id}`, {}, config);
+            if (socket) socket.emit('message-read', { senderId: targetUser._id, receiverId: user._id });
+
         } catch (error) {
             console.error('Failed to fetch history:', error);
         }
@@ -307,10 +326,52 @@ const Chat = () => {
 
     return (
         <div className="chat-app-container">
+            {/* 💡 PROFILE MODAL OVERLAY */}
+            <AnimatePresence>
+                {isProfileOpen && (
+                    <motion.div
+                        className="profile-modal-overlay"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => setIsProfileOpen(false)}
+                    >
+                        <motion.div
+                            className="profile-modal-content"
+                            initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="profile-header">
+                                <h2>Profile</h2>
+                                <button className="close-btn" onClick={() => setIsProfileOpen(false)}>×</button>
+                            </div>
+                            <div className="profile-body">
+                                <div className="profile-avatar-large">
+                                    {getInitials(user?.username)}
+                                </div>
+                                <div className="profile-detail">
+                                    <label>Your Name</label>
+                                    <p>{user?.username}</p>
+                                </div>
+                                <div className="profile-detail">
+                                    <label>Email / ID</label>
+                                    <p>{user?.email}</p>
+                                </div>
+                                <div className="profile-status">
+                                    <span className="status-dot online"></span> Active
+                                </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* CHAT LIST PANEL */}
             <div className="chat-list-panel">
                 <div className="chat-list-header">
                     <div className="header-title-row">
+                        {/* 💡 Clickable Avatar for Profile */}
+                        <div className="user-avatar-small" onClick={() => setIsProfileOpen(true)} title="View Profile" style={{ cursor: 'pointer', marginRight: '10px', width: '35px', height: '35px', borderRadius: '50%', background: '#3182ce', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                            {getInitials(user?.username)}
+                        </div>
                         <h2>Chats</h2>
                         <button className="more-btn" onClick={handleLogout} title="Logout"><FaSignOutAlt /></button>
                     </div>
@@ -369,7 +430,7 @@ const Chat = () => {
                         <div className="chat-area-header">
                             <div className="header-user-info">
                                 <div className="chat-avatar large">{getInitials(chatTarget.username)}<span className="online-indicator"></span></div>
-                                <div><h3>{chatTarget.username}</h3><div className="status-text">Active now</div></div>
+                                <div><h3>{chatTarget.username}</h3><div className="status-text">{chatTarget.isOnline ? 'Online' : 'Offline'}</div></div>
                             </div>
                             <button className="more-btn"><FaEllipsisH size={20} /></button>
                         </div>
@@ -399,7 +460,15 @@ const Chat = () => {
                                                 ) : (
                                                     <div className="message-bubble">{msg.content}</div>
                                                 )}
-                                                <div className="message-time">{formatTime(msg.createdAt)}</div>
+                                                <div className="message-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', fontSize: '10px', color: 'rgba(255,255,255,0.7)', marginTop: '2px' }}>
+                                                    <span className="message-time">{formatTime(msg.createdAt)}</span>
+                                                    {isSent && (
+                                                        <span className="read-receipt" style={{ fontWeight: 'bold', color: msg.isRead ? '#63b3ed' : 'inherit' }}>
+                                                            {/* 💡 Double Tick for Sent/Read */}
+                                                            {msg.isRead ? '✓✓' : '✓'}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                         </motion.div>
                                     );
@@ -462,3 +531,4 @@ const Chat = () => {
 };
 
 export default Chat;
+```
