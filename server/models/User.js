@@ -36,20 +36,7 @@ const userSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
-  },
-  // 💡 NEW Fields for Friend/Connection System
-  friends: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }],
-  sentRequests: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }],
-  incomingRequests: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }]
+  }
 });
 
 // Hash password before saving
