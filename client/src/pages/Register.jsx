@@ -14,7 +14,7 @@ const Register = () => {
         email: '',
         password: '',
         // 💡 Initialize avatar fields
-        avatar: EMOJI_AVATARS[0], 
+        avatar: EMOJI_AVATARS[0],
         avatarType: 'emoji'
     });
 
@@ -22,7 +22,7 @@ const Register = () => {
     const [message, setMessage] = useState('');
     const [error, setError] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
-    
+
     const navigate = useNavigate();
 
     // Handler to select a new avatar
@@ -47,22 +47,22 @@ const Register = () => {
 
         try {
             // Note: formData now includes avatar and avatarType for the backend
-            await authService.register(formData); 
-            
+            await authService.register(formData);
+
             setMessage(`Registration successful! Redirecting to login...`);
-            
+
             // Clear only necessary form fields
-            setFormData(prevData => ({ 
-                ...prevData, 
-                username: '', 
-                email: '', 
-                password: '' 
-            })); 
+            setFormData(prevData => ({
+                ...prevData,
+                username: '',
+                email: '',
+                password: ''
+            }));
 
             setTimeout(() => navigate('/login'), 1500);
 
         } catch (err) {
-            const errorMessage = 
+            const errorMessage =
                 err.response?.data?.message || 'Registration failed due to a server error.';
             setError(errorMessage);
         } finally {
@@ -72,24 +72,24 @@ const Register = () => {
 
     return (
         // 💡 WRAPPER 1: Main Auth Container for background and centering
-        <div className="auth-page-container register-page"> 
-            
+        <div className="auth-page-container register-page">
+
             {/* WRAPPER 2: The beautiful, translucent form box */}
             <div className="form-container">
-                
+
                 {/* Logo/Icon */}
                 {FaComments && <FaComments className="logo-icon" />}
-                
-                <h2>{"PINSTAGRAM"}</h2> 
+
+                <h2>{"PINSTAGRAM"}</h2>
                 <p>Join the community and chat instantly</p>
-                
+
                 {/* 💡 AVATAR SELECTION AREA */}
                 <div className="avatar-selection-area">
                     <div className="current-avatar">{avatar}</div>
                     <div className="avatar-picker">
                         {EMOJI_AVATARS.map((emoji, index) => (
-                            <button 
-                                key={index} 
+                            <button
+                                key={index}
                                 type="button"
                                 className={`emoji-btn ${avatar === emoji ? 'selected' : ''}`}
                                 onClick={() => onAvatarSelect(emoji)}
@@ -101,7 +101,7 @@ const Register = () => {
                 </div>
 
                 {/* Tab-Style Button Group */}
-                <div className="button-group"> 
+                <div className="button-group">
                     {/* Sign In Button (Unactive) */}
                     <Link to="/login" style={{ flex: 1 }}>
                         <button type="button">Sign In</button>
@@ -112,29 +112,32 @@ const Register = () => {
 
                 {/* --- Form --- */}
                 <form onSubmit={onSubmit}>
-                    <input 
-                        type="text" 
-                        name="username" 
-                        value={username} 
-                        onChange={onChange} 
-                        placeholder="Username" 
-                        required 
+                    <input
+                        type="text"
+                        name="username"
+                        value={username}
+                        onChange={onChange}
+                        placeholder="Username"
+                        autoComplete="username"
+                        required
                     />
-                    <input 
-                        type="email" 
-                        name="email" 
-                        value={email} 
-                        onChange={onChange} 
-                        placeholder="Email" 
-                        required 
+                    <input
+                        type="email"
+                        name="email"
+                        value={email}
+                        onChange={onChange}
+                        placeholder="Email"
+                        autoComplete="email"
+                        required
                     />
-                    <input 
-                        type="password" 
-                        name="password" 
-                        value={password} 
-                        onChange={onChange} 
-                        placeholder="Password (min 6 chars)" 
-                        required 
+                    <input
+                        type="password"
+                        name="password"
+                        value={password}
+                        onChange={onChange}
+                        placeholder="Password (min 6 chars)"
+                        autoComplete="new-password"
+                        required
                     />
                     <button type="submit" disabled={isLoading}>
                         {isLoading ? 'Signing Up...' : 'Sign Up'}
@@ -144,7 +147,7 @@ const Register = () => {
                 {/* --- Messages and Errors --- */}
                 {message && <p className="success-message" style={{ color: '#4cc9f0', marginTop: '20px' }}>{message}</p>}
                 {error && <p className="error-message" style={{ color: '#ff4d4f', marginTop: '10px' }}>{error}</p>}
-                
+
             </div>
         </div>
     );
