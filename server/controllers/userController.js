@@ -14,8 +14,8 @@ const jwt = require('jsonwebtoken'); // 4. to generate the tokens after successf
 // Adding a helper function to generate JWT
 const generateToken = (id) => {
     // 🐛 FIX 1: Change 'JsonWebTokenError.sign' to 'jwt.sign'
-    return jwt.sign({ id }, process.env.JWT_SECRET, { 
-        expiresIn : '30d' , //Token expires in 30 days
+    return jwt.sign({ id }, process.env.JWT_SECRET, {
+        expiresIn: '30d', //Token expires in 30 days
     });
 }
 
@@ -25,8 +25,8 @@ const generateToken = (id) => {
 const registerUser = asyncHandler(async (req, res) => {
     // Extract data from the request body
     const { username, email, password
-, avatar, avatarType
-     } = req.body;
+        , avatar, avatarType
+    } = req.body;
 
     // --- Basic Validation ---
     if (!username || !email || !password) {
@@ -86,7 +86,7 @@ const authUser = asyncHandler(async (req, res) => {
 
     // 2. Check if user exists AND if password matches
     if (user && (await bcrypt.compare(password, user.password))) {
-        
+
         // 3. SUCCESS: Send token and user data
         res.json({
             _id: user._id,
@@ -97,7 +97,7 @@ const authUser = asyncHandler(async (req, res) => {
         });
     } else {
         // 4. FAILURE
-        res.status(401); 
+        res.status(401);
         throw new Error('Invalid email or password');
     }
 });
@@ -117,27 +117,113 @@ const getMyProfile = asyncHandler(async (req, res) => {
     });
 });
 
-const getAllUsers = asyncHandler(async (req, res) => {
-    // req.user is the currently logged-in user, set by the 'protect' middleware.
-    const currentUserId = req.user._id;
-
-    // Fetch all users BUT exclude the current user.
-    const users = await User.find({ _id: { $ne: currentUserId } })
-        .select('-password -__v') // Exclude password and Mongoose version field
-        .sort({ username: 1 }); // Sort alphabetically
-
-    if (users) {
-        res.status(200).json(users);
-    } else {
-        res.status(404);
-        throw new Error('No other users found.');
-    }
+// @desc    Get my friends (Connected Users)
+// @route   GET /api/users/friends (Replaces logic of getAllUsers for chat list)
+// @access  Private
+const getFriends = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user._id).populate('friends', '-password');
+    res.status(200).json(user.friends);
 });
 
+// @desc    Search for users (Global search) -> Returns users NOT already friends/pending
+// @route   GET /api/users/search?query=abc
+// @access  Private
+const searchUsers = asyncHandler(async (req, res) => {
+    const keyword = req.query.query ? {
+        $or: [
+            { username: { $regex: req.query.query, $options: 'i' } },
+            { email: { $regex: req.query.query, $options: 'i' } },
+        ],
+    } : {};
+
+    // Exclude current user
+    let users = await User.find(keyword).find({ _id: { $ne: req.user._id } }).select('-password');
+
+    // EXCLUDE users who are already friends or have pending requests
+    const currentUser = await User.findById(req.user._id);
+    users = users.filter(u =>
+        !currentUser.friends.includes(u._id) &&
+        !currentUser.sentRequests.includes(u._id) &&
+        !currentUser.incomingRequests.includes(u._id)
+    );
+
+    res.json(users);
+});
+
+// @desc    Send Friend Request
+// @route   POST /api/users/request/:id
+// @access  Private
+const sendFriendRequest = asyncHandler(async (req, res) => {
+    const targetUserId = req.params.id;
+    const currentUserId = req.user._id;
+
+    if (targetUserId === currentUserId.toString()) {
+        res.status(400); throw new Error("Cannot add yourself");
+    }
+
+    const targetUser = await User.findById(targetUserId);
+    const currentUser = await User.findById(currentUserId);
+
+    if (!targetUser) { res.status(404); throw new Error("User not found"); }
+
+    // Check if already friends or requested
+    if (currentUser.friends.includes(targetUserId)) { res.status(400); throw new Error("Already friends"); }
+    if (currentUser.sentRequests.includes(targetUserId)) { res.status(400); throw new Error("Request already sent"); }
+    if (currentUser.incomingRequests.includes(targetUserId)) { res.status(400); throw new Error("User has already sent you a request"); }
+
+    // Update Arrays
+    await User.findByIdAndUpdate(currentUserId, { $push: { sentRequests: targetUserId } });
+    await User.findByIdAndUpdate(targetUserId, { $push: { incomingRequests: currentUserId } });
+
+    res.status(200).json({ message: "Request Sent" });
+});
+
+// @desc    Accept Friend Request
+// @route   POST /api/users/accept/:id
+// @access  Private
+const acceptFriendRequest = asyncHandler(async (req, res) => {
+    const requesterId = req.params.id;
+    const currentUserId = req.user._id;
+
+    const currentUser = await User.findById(currentUserId);
+
+    if (!currentUser.incomingRequests.includes(requesterId)) {
+        res.status(400); throw new Error("No request from this user");
+    }
+
+    // Add to friends, remove from requests
+    await User.findByIdAndUpdate(currentUserId, {
+        $push: { friends: requesterId },
+        $pull: { incomingRequests: requesterId }
+    });
+
+    await User.findByIdAndUpdate(requesterId, {
+        $push: { friends: currentUserId },
+        $pull: { sentRequests: currentUserId }
+    });
+
+    res.status(200).json({ message: "Request Accepted" });
+});
+
+// @desc    Get Incoming Requests
+// @route   GET /api/users/requests
+// @access  Private
+const getFriendRequests = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user._id).populate('incomingRequests', '-password');
+    res.status(200).json(user.incomingRequests);
+});
+
+
+// KEEPING OLD getAllUsers for backward compatibility if needed, but updated to "getFriends" logic usually
+const getAllUsers = getFriends;
 
 module.exports = {
     registerUser,
     authUser,
-    getMyProfile, 
-    getAllUsers,
+    getMyProfile,
+    getAllUsers, // Now maps to getFriends (Connected users only)
+    searchUsers,
+    sendFriendRequest,
+    acceptFriendRequest,
+    getFriendRequests
 };

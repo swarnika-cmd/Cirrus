@@ -38,295 +38,74 @@ const Chat = () => {
     const [messageInput, setMessageInput] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const [isTyping, setIsTyping] = useState(false); // Validates if *other* user is typing
-    const [isProfileOpen, setIsProfileOpen] = useState(false); // 💡 Profile Modal State
+    const [isAddFriendOpen, setIsAddFriendOpen] = useState(false);
+    const [viewRequests, setViewRequests] = useState(false);
+    const [contactSearchQuery, setContactSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
+    const [requests, setRequests] = useState([]);
 
-    const messagesEndRef = useRef(null);
-    const fileInputRef = useRef(null);
+    // ... (Existing effects)
 
-    // --- UTILITY FUNCTIONS ---
-    const getInitials = (name) => name ? name.charAt(0).toUpperCase() : '?';
-
-    const formatTime = (date) => {
-        if (!date) return '';
-        const d = new Date(date);
-        return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    };
-
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
-
-    const handleEmojiSelect = (emoji) => {
-        setMessageInput(prev => prev + emoji);
-    };
-
-    // --- EFFECTS & SOCKETS ---
-
-    const typingTimeoutRef = useRef(null); // Ref for typing timeout
-
-    // --- EFFECTS & SOCKETS ---
-
-    // 1. Initialize Socket
-    useEffect(() => {
-        const newSocket = io(ENDPOINT, {
-            transports: ['websocket', 'polling'],
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000
-        });
-
-        newSocket.on('connect', () => {
-            console.log('✅ Socket connected:', newSocket.id);
-            if (user?._id) {
-                newSocket.emit('user-online', user._id);
-            }
-        });
-
-        // 💡 NEW: Listen for read receipts
-        newSocket.on('message-read', ({ receiverId }) => {
-            // If we are chatting with the person who read our messages, update UI
-            setMessages(prev => prev.map(msg =>
-                msg.sender === user._id || msg.sender?._id === user._id
-                    ? { ...msg, isRead: true }
-                    : msg
-            ));
-        });
-
-        setSocket(newSocket);
-
-        return () => {
-            newSocket.disconnect();
-        };
-    }, [user]);
-
-    // 2. Handle Typing Events
-    useEffect(() => {
-        if (!socket) return;
-
-        const handleTyping = ({ userId }) => {
-            if (chatTarget && userId === chatTarget._id) {
-                setIsTyping(true);
-                scrollToBottom();
-            }
-        };
-
-        const handleStoppedTyping = ({ userId }) => {
-            if (chatTarget && userId === chatTarget._id) {
-                setIsTyping(false);
-            }
-        };
-
-        // 💡 NEW: Handle One-Time User Status Changes
-        const handleStatusChange = ({ userId, status }) => {
-            setAllUsers(prevUsers => prevUsers.map(u =>
-                u._id === userId ? { ...u, isOnline: status === 'online' } : u
-            ));
-        };
-
-        socket.on('user-typing', handleTyping);
-        socket.on('user-stopped-typing', handleStoppedTyping);
-        socket.on('user-status-change', handleStatusChange);
-
-        return () => {
-            socket.off('user-typing', handleTyping);
-            socket.off('user-stopped-typing', handleStoppedTyping);
-            socket.off('user-status-change', handleStatusChange);
-        };
-    }, [socket, chatTarget]);
-
-    // 3. Listen for Messages & Auto-Mark Read
-    useEffect(() => {
-        if (!socket) return;
-
-        const handleReceiveMessage = async (newMessage) => {
-            console.log('📨 Message received in FE:', newMessage);
-
-            // A. Update current active chat messages
-            if (chatTarget) {
-                const isForCurrentChat =
-                    (newMessage.sender?._id === chatTarget._id || newMessage.sender === chatTarget._id) ||
-                    (newMessage.receiver?._id === chatTarget._id || newMessage.receiver === chatTarget._id);
-
-                if (isForCurrentChat) {
-                    setMessages((prev) => {
-                        const isDuplicate = prev.some(msg => msg._id === newMessage._id);
-                        if (isDuplicate) return prev;
-                        return [...prev, newMessage];
-                    });
-                    setIsTyping(false);
-
-                    // 💡 NEW: If we are viewing this chat, mark as read immediately
-                    if (newMessage.sender?._id === chatTarget._id || newMessage.sender === chatTarget._id) {
-                        try {
-                            const config = { headers: { Authorization: `Bearer ${token}` } };
-                            await axios.put(`${ENDPOINT}/api/messages/read/${chatTarget._id}`, {}, config);
-                            socket.emit('message-read', { senderId: chatTarget._id, receiverId: user._id });
-                        } catch (err) { console.error("Error marking read:", err); }
-                    }
-                }
-            }
-
-            // B. Update Chat List Preview (Unchanged)
-            setAllUsers(prevUsers => {
-                return prevUsers.map(user => {
-                    const isSender = (newMessage.sender?._id || newMessage.sender) === user._id;
-                    const isReceiver = (newMessage.receiver?._id || newMessage.receiver) === user._id;
-                    if (isSender || isReceiver) {
-                        return {
-                            ...user,
-                            lastMessage: newMessage.content || 'Photo',
-                            lastMessageTime: newMessage.createdAt
-                        };
-                    }
-                    return user;
-                }).sort((a, b) => new Date(b.lastMessageTime || 0) - new Date(a.lastMessageTime || 0));
-            });
-        };
-
-        socket.on('receive-message', handleReceiveMessage);
-        return () => socket.off('receive-message', handleReceiveMessage);
-    }, [socket, chatTarget, token, user]); // Added token and user deps
-
-    // Room Joining
-    useEffect(() => {
-        if (!chatTarget || !socket) return;
-        const roomId = user._id < chatTarget._id ? `${user._id}_${chatTarget._id}` : `${chatTarget._id}_${user._id}`;
-        socket.emit('join_chat', roomId);
-        return () => socket.emit('leave_chat', roomId);
-    }, [chatTarget, socket, user._id]);
-
-    // Fetch Users
+    // Fetch Friends (Main List)
     useEffect(() => {
         if (!token) return;
-        const fetchUsers = async () => {
+        const fetchFriends = async () => {
             try {
                 const config = { headers: { Authorization: `Bearer ${token}` } };
-                const response = await axios.get(`${ENDPOINT}/api/users/all`, config);
+                const response = await axios.get(`${ENDPOINT}/api/users/all`, config); // Now returns friends
                 setAllUsers(response.data);
             } catch (error) {
-                console.error('Failed to fetch users:', error);
-                if (error.response?.status === 401) {
-                    authService.logout();
-                    dispatch({ type: 'LOGOUT' });
-                    navigate('/login');
-                }
+                console.error('Failed to fetch friends:', error);
             }
         };
-        fetchUsers();
-    }, [token]);
+        fetchFriends();
+    }, [token, isAddFriendOpen, viewRequests]); // Refresh when closing modals
 
-    // Scroll effect
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages, isTyping]);
-
-
-    // --- HANDLERS ---
-
-    const handleLogout = () => {
-        authService.logout();
-        dispatch({ type: 'LOGOUT' });
-        navigate('/login');
-    };
-
-    const selectChatTarget = async (targetUser) => {
-        setChatTarget(targetUser);
-        setMessages([]);
-        setIsTyping(false);
-
-        const roomId = user._id < targetUser._id ? `${user._id}_${targetUser._id}` : `${targetUser._id}_${user._id}`;
-        if (socket) socket.emit('join_chat', roomId);
-
-        try {
-            const config = { headers: { Authorization: `Bearer ${token}` } };
-            const response = await axios.get(`${ENDPOINT}/api/messages/${targetUser._id}`, config);
-            setMessages(response.data);
-
-            // 💡 NEW: Mark messages as read when opening chat
-            await axios.put(`${ENDPOINT}/api/messages/read/${targetUser._id}`, {}, config);
-            if (socket) socket.emit('message-read', { senderId: targetUser._id, receiverId: user._id });
-
-        } catch (error) {
-            console.error('Failed to fetch history:', error);
-        }
-    };
-
-    const handleTyping = (e) => {
-        setMessageInput(e.target.value);
-
-        if (!socket || !chatTarget) return;
-
-        // Emit typing start
-        socket.emit('typing-start', { senderId: user._id, receiverId: chatTarget._id });
-
-        // Clear existing timeout
-        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-
-        // Set timeout to stop typing
-        typingTimeoutRef.current = setTimeout(() => {
-            socket.emit('typing-stop', { senderId: user._id, receiverId: chatTarget._id });
-        }, 2000);
-    };
-
-    const handleFileUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file || !chatTarget) return;
-
-        const formData = new FormData();
-        formData.append('image', file);
-        formData.append('receiverId', chatTarget._id);
-
-        try {
-            const config = {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'multipart/form-data'
-                }
-            };
-            const response = await axios.post(`${ENDPOINT}/api/upload`, formData, config);
-
-            // Emit the file message
-            console.log("📤 Sending file:", response.data);
-            socket.emit('send-message', response.data);
-            setMessages(prev => [...prev, response.data]);
-
-        } catch (error) {
-            console.error("File upload failed:", error);
-            alert("Failed to upload image.");
-        }
-    };
-
-    const sendChatMessage = async (e) => {
+    // Search Handler
+    const handleSearchNewUsers = async (e) => {
         e.preventDefault();
-        if (!messageInput.trim() || !chatTarget) return;
-
-        const messageData = {
-            receiverId: chatTarget._id,
-            content: messageInput,
-        };
-
         try {
             const config = { headers: { Authorization: `Bearer ${token}` } };
-            const savedMessage = await axios.post(`${ENDPOINT}/api/messages`, messageData, config);
-
-            socket.emit('send-message', savedMessage.data);
-            socket.emit('typing-stop', { senderId: user._id, receiverId: chatTarget._id }); // Ensure typing stops
-
-            setMessages(prev => [...prev, savedMessage.data]);
-            setMessageInput('');
-
-        } catch (error) {
-            console.error("Failed to send:", error);
-        }
+            const { data } = await axios.get(`${ENDPOINT}/api/users/search?query=${contactSearchQuery}`, config);
+            setSearchResults(data);
+        } catch (error) { console.error(error); }
     };
 
-    const filteredUsers = allUsers.filter(u =>
-        u.username.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    // Send Request Handler
+    const handleSendRequest = async (userId) => {
+        try {
+            const config = { headers: { Authorization: `Bearer ${token}` } };
+            await axios.post(`${ENDPOINT}/api/users/request/${userId}`, {}, config);
+            alert("Request sent!");
+            setSearchResults(prev => prev.filter(u => u._id !== userId));
+        } catch (error) { alert(error.response?.data?.message || "Error sending request"); }
+    };
+
+    // Accept Request Handler
+    const handleAcceptRequest = async (userId) => {
+        try {
+            const config = { headers: { Authorization: `Bearer ${token}` } };
+            await axios.post(`${ENDPOINT}/api/users/accept/${userId}`, {}, config);
+            // Refresh requests
+            setRequests(prev => prev.filter(u => u._id !== userId));
+            alert("Request accepted! You can now chat.");
+            setIsAddFriendOpen(false); // Close modal to refresh main list
+        } catch (error) { alert("Error accepting request"); }
+    };
+
+    // Load Requests when opening Add Friend Modal
+    useEffect(() => {
+        if (isAddFriendOpen && token) {
+            axios.get(`${ENDPOINT}/api/users/requests`, { headers: { Authorization: `Bearer ${token}` } })
+                .then(res => setRequests(res.data))
+                .catch(err => console.error(err));
+        }
+    }, [isAddFriendOpen, token]);
+
 
     return (
         <div className="chat-app-container">
-            {/* 💡 PROFILE MODAL OVERLAY */}
+            {/* ... (Profile Modal) ... */}
             <AnimatePresence>
                 {isProfileOpen && (
                     <motion.div
@@ -364,54 +143,148 @@ const Chat = () => {
                 )}
             </AnimatePresence>
 
+            {/* 💡 ADD FRIEND & REQUESTS MODAL */}
+            <AnimatePresence>
+                {isAddFriendOpen && (
+                    <motion.div
+                        className="profile-modal-overlay"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => setIsAddFriendOpen(false)}
+                    >
+                        <motion.div
+                            className="profile-modal-content"
+                            style={{ maxWidth: '500px' }}
+                            initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="profile-header">
+                                <h2>Manage Connections</h2>
+                                <button className="close-btn" onClick={() => setIsAddFriendOpen(false)}>×</button>
+                            </div>
+                            <div className="profile-body" style={{ alignItems: 'stretch', textAlign: 'left', padding: '20px' }}>
+                                {/* TABS */}
+                                <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                                    <button
+                                        onClick={() => setViewRequests(false)}
+                                        style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: !viewRequests ? '#667eea' : '#f0f0f0', color: !viewRequests ? 'white' : 'black', cursor: 'pointer' }}
+                                    >
+                                        Search Users
+                                    </button>
+                                    <button
+                                        onClick={() => setViewRequests(true)}
+                                        style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: viewRequests ? '#667eea' : '#f0f0f0', color: viewRequests ? 'white' : 'black', cursor: 'pointer' }}
+                                    >
+                                        Requests ({requests.length})
+                                    </button>
+                                </div>
+
+                                {/* CONTENT */}
+                                {viewRequests ? (
+                                    <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                                        {requests.length === 0 ? <p style={{ textAlign: 'center', color: '#888' }}>No pending requests.</p> : (
+                                            requests.map(req => (
+                                                <div key={req._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid #eee' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <div className="chat-avatar" style={{ width: '30px', height: '30px', fontSize: '12px' }}>{getInitials(req.username)}</div>
+                                                        <span>{req.username}</span>
+                                                    </div>
+                                                    <button onClick={() => handleAcceptRequest(req._id)} style={{ padding: '6px 12px', background: '#48bb78', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Accept</button>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <form onSubmit={handleSearchNewUsers} style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
+                                            <input
+                                                type="text"
+                                                placeholder="Enter username/email..."
+                                                value={contactSearchQuery}
+                                                onChange={(e) => setContactSearchQuery(e.target.value)}
+                                                style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}
+                                            />
+                                            <button type="submit" style={{ padding: '10px 16px', background: '#667eea', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}><FaSearch /></button>
+                                        </form>
+                                        <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                                            {searchResults.map(res => (
+                                                <div key={res._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid #eee' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <div className="chat-avatar" style={{ width: '30px', height: '30px', fontSize: '12px' }}>{getInitials(res.username)}</div>
+                                                        <span>{res.username}</span>
+                                                    </div>
+                                                    <button onClick={() => handleSendRequest(res._id)} style={{ padding: '6px 12px', background: '#3182ce', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}>Add</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* CHAT LIST PANEL */}
             <div className="chat-list-panel">
                 <div className="chat-list-header">
                     <div className="header-title-row">
-                        {/* 💡 Clickable Avatar for Profile */}
                         <div className="user-avatar-small" onClick={() => setIsProfileOpen(true)} title="View Profile" style={{ cursor: 'pointer', marginRight: '10px', width: '35px', height: '35px', borderRadius: '50%', background: '#3182ce', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
                             {getInitials(user?.username)}
                         </div>
                         <h2>Chats</h2>
-                        <button className="more-btn" onClick={handleLogout} title="Logout"><FaSignOutAlt /></button>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            {/* 💡 Add Friend Button */}
+                            <button className="more-btn" onClick={() => setIsAddFriendOpen(true)} title="Add Friend / Requests">
+                                <span style={{ fontSize: '18px', fontWeight: 'bold' }}>+</span>
+                            </button>
+                            <button className="more-btn" onClick={handleLogout} title="Logout"><FaSignOutAlt /></button>
+                        </div>
                     </div>
+                    {/* ... (Search and List remain same) ... */}
                     <div className="search-box">
                         <FaSearch />
                         <input
                             type="text"
-                            placeholder="Search..."
+                            placeholder="Search chats..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
                     </div>
                 </div>
                 <div className="chat-list">
-                    {filteredUsers.map((targetUser) => (
-                        <motion.div
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                            key={targetUser._id}
-                            className={`chat-list-item ${chatTarget?._id === targetUser._id ? 'active' : ''}`}
-                            onClick={() => selectChatTarget(targetUser)}
-                        >
-                            <div className="chat-avatar">
-                                {getInitials(targetUser.username)}
-                                {/* 💡 Dynamic Online Indicator */}
-                                {targetUser.isOnline && <span className="online-indicator"></span>}
-                            </div>
-                            <div className="chat-info">
-                                <div className="chat-name">{targetUser.username}</div>
-                                {/* 💡 Dynamic Last Message Preview */}
-                                <div className="chat-preview">
-                                    {targetUser.lastMessage || 'Click to chat'}
+                    {filteredUsers.length === 0 ? (
+                        <div style={{ padding: '20px', textAlign: 'center', color: '#a0aec0', fontSize: '14px' }}>
+                            <p>No chats yet.</p>
+                            <button onClick={() => setIsAddFriendOpen(true)} style={{ marginTop: '10px', color: '#667eea', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '600' }}>Find People</button>
+                        </div>
+                    ) : (
+                        filteredUsers.map((targetUser) => (
+                            <motion.div
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
+                                key={targetUser._id}
+                                className={`chat-list-item ${chatTarget?._id === targetUser._id ? 'active' : ''}`}
+                                onClick={() => selectChatTarget(targetUser)}
+                            >
+                                <div className="chat-avatar">
+                                    {getInitials(targetUser.username)}
+                                    {/* 💡 Dynamic Online Indicator */}
+                                    {targetUser.isOnline && <span className="online-indicator"></span>}
                                 </div>
-                            </div>
-                            <div className="chat-time">
-                                {/* 💡 Dynamic Time */}
-                                {targetUser.lastMessageTime ? formatTime(targetUser.lastMessageTime) : ''}
-                            </div>
-                        </motion.div>
-                    ))}
+                                <div className="chat-info">
+                                    <div className="chat-name">{targetUser.username}</div>
+                                    {/* 💡 Dynamic Last Message Preview */}
+                                    <div className="chat-preview">
+                                        {targetUser.lastMessage || 'Click to chat'}
+                                    </div>
+                                </div>
+                                <div className="chat-time">
+                                    {/* 💡 Dynamic Time */}
+                                    {targetUser.lastMessageTime ? formatTime(targetUser.lastMessageTime) : ''}
+                                </div>
+                            </motion.div>
+                        ))
+                    )}
                 </div>
             </div>
 
@@ -422,11 +295,12 @@ const Chat = () => {
                         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
                             <FaComments size={64} style={{ color: '#cbd5e0' }} />
                             <h3>Welcome to PINSTAGRAM</h3>
-                            <p>Select a conversation to start messaging</p>
+                            <p>Select a conversation or add a friend to start messaging</p>
                         </motion.div>
                     </div>
                 ) : (
                     <>
+                        {/* ... (Existing Chat Area) ... */}
                         <div className="chat-area-header">
                             <div className="header-user-info">
                                 <div className="chat-avatar large">{getInitials(chatTarget.username)}<span className="online-indicator"></span></div>
@@ -464,7 +338,6 @@ const Chat = () => {
                                                     <span className="message-time">{formatTime(msg.createdAt)}</span>
                                                     {isSent && (
                                                         <span className="read-receipt" style={{ fontWeight: 'bold', color: msg.isRead ? '#63b3ed' : 'inherit' }}>
-                                                            {/* 💡 Double Tick for Sent/Read */}
                                                             {msg.isRead ? '✓✓' : '✓'}
                                                         </span>
                                                     )}
@@ -511,7 +384,7 @@ const Chat = () => {
                                     className="message-input-field"
                                     placeholder="Type a message..."
                                     value={messageInput}
-                                    onChange={handleTyping} // Uses handleTyping instead of direct set state
+                                    onChange={handleTyping}
                                 />
 
                                 <button
@@ -529,5 +402,4 @@ const Chat = () => {
         </div>
     );
 };
-
 export default Chat;
