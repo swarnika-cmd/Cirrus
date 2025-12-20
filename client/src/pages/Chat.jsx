@@ -24,7 +24,6 @@ import {
 } from 'react-icons/fa';
 
 const ENDPOINT = API_BASE_URL;
-let socket;
 let typingTimeout = null;
 
 const Chat = () => {
@@ -32,6 +31,7 @@ const Chat = () => {
     const navigate = useNavigate();
 
     // State
+    const [socket, setSocket] = useState(null); // 💡 Socket is now managed in state
     const [allUsers, setAllUsers] = useState([]);
     const [chatTarget, setChatTarget] = useState(null);
     const [messages, setMessages] = useState([]);
@@ -61,45 +61,67 @@ const Chat = () => {
 
     // --- EFFECTS & SOCKETS ---
 
+    const typingTimeoutRef = useRef(null); // Ref for typing timeout
+
+    // --- EFFECTS & SOCKETS ---
+
+    // 1. Initialize Socket
     useEffect(() => {
-        socket = io(ENDPOINT, {
+        const newSocket = io(ENDPOINT, {
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 1000
         });
 
-        socket.on('connect', () => {
-            console.log('✅ Socket connected:', socket.id);
+        newSocket.on('connect', () => {
+            console.log('✅ Socket connected:', newSocket.id);
             if (user?._id) {
-                socket.emit('user-online', user._id);
+                newSocket.emit('user-online', user._id);
             }
         });
 
-        // Listen for typing events
-        socket.on('user-typing', ({ userId }) => {
+        setSocket(newSocket);
+
+        return () => {
+            newSocket.disconnect();
+        };
+    }, [user]);
+
+    // 2. Handle Typing Events
+    useEffect(() => {
+        if (!socket) return;
+
+        const handleTyping = ({ userId }) => {
             if (chatTarget && userId === chatTarget._id) {
                 setIsTyping(true);
                 scrollToBottom();
             }
-        });
+        };
 
-        socket.on('user-stopped-typing', ({ userId }) => {
+        const handleStoppedTyping = ({ userId }) => {
             if (chatTarget && userId === chatTarget._id) {
                 setIsTyping(false);
             }
-        });
+        };
+
+        socket.on('user-typing', handleTyping);
+        socket.on('user-stopped-typing', handleStoppedTyping);
 
         return () => {
-            socket.disconnect();
+            socket.off('user-typing', handleTyping);
+            socket.off('user-stopped-typing', handleStoppedTyping);
         };
-    }, [user, chatTarget]);
+    }, [socket, chatTarget]);
 
-    // Listen for messages
+    // 3. Listen for Messages
     useEffect(() => {
         if (!socket) return;
 
         const handleReceiveMessage = (newMessage) => {
+            console.log('📨 Message received in FE:', newMessage);
+
+            // Check if message belongs to the current chat
             if (chatTarget) {
                 const isForCurrentChat =
                     (newMessage.sender?._id === chatTarget._id || newMessage.sender === chatTarget._id) ||
@@ -111,14 +133,14 @@ const Chat = () => {
                         if (isDuplicate) return prev;
                         return [...prev, newMessage];
                     });
-                    setIsTyping(false); // Stop typing indicator if message received
+                    setIsTyping(false);
                 }
             }
         };
 
         socket.on('receive-message', handleReceiveMessage);
         return () => socket.off('receive-message', handleReceiveMessage);
-    }, [chatTarget]);
+    }, [socket, chatTarget]);
 
     // Room Joining
     useEffect(() => {
@@ -126,7 +148,7 @@ const Chat = () => {
         const roomId = user._id < chatTarget._id ? `${user._id}_${chatTarget._id}` : `${chatTarget._id}_${user._id}`;
         socket.emit('join_chat', roomId);
         return () => socket.emit('leave_chat', roomId);
-    }, [chatTarget, user._id]);
+    }, [chatTarget, socket, user._id]);
 
     // Fetch Users
     useEffect(() => {
@@ -167,6 +189,9 @@ const Chat = () => {
         setMessages([]);
         setIsTyping(false);
 
+        const roomId = user._id < targetUser._id ? `${user._id}_${targetUser._id}` : `${targetUser._id}_${user._id}`;
+        if (socket) socket.emit('join_chat', roomId);
+
         try {
             const config = { headers: { Authorization: `Bearer ${token}` } };
             const response = await axios.get(`${ENDPOINT}/api/messages/${targetUser._id}`, config);
@@ -185,10 +210,10 @@ const Chat = () => {
         socket.emit('typing-start', { senderId: user._id, receiverId: chatTarget._id });
 
         // Clear existing timeout
-        if (typingTimeout) clearTimeout(typingTimeout);
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
         // Set timeout to stop typing
-        typingTimeout = setTimeout(() => {
+        typingTimeoutRef.current = setTimeout(() => {
             socket.emit('typing-stop', { senderId: user._id, receiverId: chatTarget._id });
         }, 2000);
     };
