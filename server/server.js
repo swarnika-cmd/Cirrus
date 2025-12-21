@@ -26,6 +26,8 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
 const allowedOrigins = [
     'http://localhost:5173',
+    'http://localhost:5174', // Often used
+    'http://localhost:5175', // Current User Port
     'https://real-time-chat-application-frontend-u0s4.onrender.com', // ADD YOUR FRONTEND URL
     CLIENT_ORIGIN
 ].filter(Boolean);

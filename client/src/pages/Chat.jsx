@@ -1,4 +1,4 @@
-// client/src/pages/Chat.jsx - Final Integration with Animations & Features
+// client/src/pages/Chat.jsx - Final Integration with Robust Avatar Handling
 
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -26,26 +26,66 @@ import {
 const ENDPOINT = API_BASE_URL;
 let typingTimeout = null;
 
+// --- UTILITY COMPONENT: AvatarDisplay ---
+// Handles image loading errors gracefully (fall back to initials)
+const AvatarDisplay = ({ user, size = 'small' }) => {
+    const [imgError, setImgError] = useState(false);
+
+    if (!user) return <div className={`avatar-placeholder ${size}`}>?</div>;
+
+    const getInitials = (name) => name ? name.charAt(0).toUpperCase() : '?';
+
+    // Determine if we should try to render an image
+    // Check for 'image' type OR if the avatar string looks like a URL (backward compatibility)
+    const isImage = (user.avatarType === 'image') || (user.avatar && (user.avatar.startsWith('/') || user.avatar.startsWith('http')));
+
+    // If it's an image and hasn't failed yet:
+    if (isImage && !imgError && user.avatar) {
+        return (
+            <img
+                src={user.avatar}
+                alt={user.username}
+                onError={() => setImgError(true)}
+                style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    borderRadius: '50%'
+                }}
+            />
+        );
+    }
+
+    // Fallback: Render Emoji or Initials
+    // If it was an image but failed (imgError=true), we show Initials.
+    // If it's explicitly an emoji type, we show the emoji.
+    if (user.avatarType === 'emoji' && !imgError) {
+        return <span style={{ fontSize: size === 'large' ? '1.5em' : '1.2em' }}>{user.avatar}</span>;
+    }
+
+    return <span style={{ fontSize: size === 'large' ? '1.5em' : '1.2em' }}>{getInitials(user.username)}</span>;
+};
+
+
 const Chat = () => {
     const { user, token, dispatch } = useContext(AuthContext);
     const navigate = useNavigate();
 
     // State
-    const [socket, setSocket] = useState(null); // 💡 Socket is now managed in state
+    const [socket, setSocket] = useState(null);
     const [allUsers, setAllUsers] = useState([]);
     const [chatTarget, setChatTarget] = useState(null);
     const [messages, setMessages] = useState([]);
     const [messageInput, setMessageInput] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [isTyping, setIsTyping] = useState(false); // Validates if *other* user is typing
-    const [isProfileOpen, setIsProfileOpen] = useState(false); // 💡 Profile Modal State
+    const [isTyping, setIsTyping] = useState(false);
+    const [isProfileOpen, setIsProfileOpen] = useState(false);
 
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
+    const typingTimeoutRef = useRef(null);
 
-    // --- UTILITY FUNCTIONS ---
-    const getInitials = (name) => name ? name.charAt(0).toUpperCase() : '?';
-
+    // --- UTILITY ---
     const formatTime = (date) => {
         if (!date) return '';
         const d = new Date(date);
@@ -59,10 +99,6 @@ const Chat = () => {
     const handleEmojiSelect = (emoji) => {
         setMessageInput(prev => prev + emoji);
     };
-
-    // --- EFFECTS & SOCKETS ---
-
-    const typingTimeoutRef = useRef(null); // Ref for typing timeout
 
     // --- EFFECTS & SOCKETS ---
 
@@ -82,9 +118,7 @@ const Chat = () => {
             }
         });
 
-        // 💡 NEW: Listen for read receipts
         newSocket.on('message-read', ({ receiverId }) => {
-            // If we are chatting with the person who read our messages, update UI
             setMessages(prev => prev.map(msg =>
                 msg.sender === user._id || msg.sender?._id === user._id
                     ? { ...msg, isRead: true }
@@ -99,7 +133,7 @@ const Chat = () => {
         };
     }, [user]);
 
-    // 2. Handle Typing Events
+    // 2. Handle Typing & Status
     useEffect(() => {
         if (!socket) return;
 
@@ -116,7 +150,6 @@ const Chat = () => {
             }
         };
 
-        // 💡 NEW: Handle One-Time User Status Changes
         const handleStatusChange = ({ userId, status }) => {
             setAllUsers(prevUsers => prevUsers.map(u =>
                 u._id === userId ? { ...u, isOnline: status === 'online' } : u
@@ -134,14 +167,11 @@ const Chat = () => {
         };
     }, [socket, chatTarget]);
 
-    // 3. Listen for Messages & Auto-Mark Read
+    // 3. Listen for Messages
     useEffect(() => {
         if (!socket) return;
 
         const handleReceiveMessage = async (newMessage) => {
-            console.log('📨 Message received in FE:', newMessage);
-
-            // A. Update current active chat messages
             if (chatTarget) {
                 const isForCurrentChat =
                     (newMessage.sender?._id === chatTarget._id || newMessage.sender === chatTarget._id) ||
@@ -155,7 +185,6 @@ const Chat = () => {
                     });
                     setIsTyping(false);
 
-                    // 💡 NEW: If we are viewing this chat, mark as read immediately
                     if (newMessage.sender?._id === chatTarget._id || newMessage.sender === chatTarget._id) {
                         try {
                             const config = { headers: { Authorization: `Bearer ${token}` } };
@@ -166,7 +195,6 @@ const Chat = () => {
                 }
             }
 
-            // B. Update Chat List Preview (Unchanged)
             setAllUsers(prevUsers => {
                 return prevUsers.map(user => {
                     const isSender = (newMessage.sender?._id || newMessage.sender) === user._id;
@@ -185,7 +213,7 @@ const Chat = () => {
 
         socket.on('receive-message', handleReceiveMessage);
         return () => socket.off('receive-message', handleReceiveMessage);
-    }, [socket, chatTarget, token, user]); // Added token and user deps
+    }, [socket, chatTarget, token, user]);
 
     // Room Joining
     useEffect(() => {
@@ -195,14 +223,13 @@ const Chat = () => {
         return () => socket.emit('leave_chat', roomId);
     }, [chatTarget, socket, user._id]);
 
-    // Fetch Users & Search Logic
+    // Fetch Users
     useEffect(() => {
         if (!token) return;
 
         const fetchUsers = async () => {
             try {
                 const config = { headers: { Authorization: `Bearer ${token}` } };
-                // 💡 Logic: If searching, get everyone (to find new friends). If not, get only top 4 recent.
                 const endpoint = searchQuery.trim()
                     ? `${ENDPOINT}/api/users/all`
                     : `${ENDPOINT}/api/users/recent`;
@@ -219,7 +246,6 @@ const Chat = () => {
             }
         };
 
-        // Debounce search slightly to avoid spamming while typing
         const timeoutId = setTimeout(() => {
             fetchUsers();
         }, 300);
@@ -234,7 +260,6 @@ const Chat = () => {
 
 
     // --- HANDLERS ---
-
     const handleLogout = () => {
         authService.logout();
         dispatch({ type: 'LOGOUT' });
@@ -245,6 +270,7 @@ const Chat = () => {
         setChatTarget(targetUser);
         setMessages([]);
         setIsTyping(false);
+        // Force refresh avatar state for target if needed by resetting something? No, Component handles it.
 
         const roomId = user._id < targetUser._id ? `${user._id}_${targetUser._id}` : `${targetUser._id}_${user._id}`;
         if (socket) socket.emit('join_chat', roomId);
@@ -254,7 +280,6 @@ const Chat = () => {
             const response = await axios.get(`${ENDPOINT}/api/messages/${targetUser._id}`, config);
             setMessages(response.data);
 
-            // 💡 NEW: Mark messages as read when opening chat
             await axios.put(`${ENDPOINT}/api/messages/read/${targetUser._id}`, {}, config);
             if (socket) socket.emit('message-read', { senderId: targetUser._id, receiverId: user._id });
 
@@ -265,16 +290,11 @@ const Chat = () => {
 
     const handleTyping = (e) => {
         setMessageInput(e.target.value);
-
         if (!socket || !chatTarget) return;
 
-        // Emit typing start
         socket.emit('typing-start', { senderId: user._id, receiverId: chatTarget._id });
 
-        // Clear existing timeout
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-
-        // Set timeout to stop typing
         typingTimeoutRef.current = setTimeout(() => {
             socket.emit('typing-stop', { senderId: user._id, receiverId: chatTarget._id });
         }, 2000);
@@ -296,9 +316,6 @@ const Chat = () => {
                 }
             };
             const response = await axios.post(`${ENDPOINT}/api/upload`, formData, config);
-
-            // Emit the file message
-            console.log("📤 Sending file:", response.data);
             socket.emit('send-message', response.data);
             setMessages(prev => [...prev, response.data]);
 
@@ -322,7 +339,7 @@ const Chat = () => {
             const savedMessage = await axios.post(`${ENDPOINT}/api/messages`, messageData, config);
 
             socket.emit('send-message', savedMessage.data);
-            socket.emit('typing-stop', { senderId: user._id, receiverId: chatTarget._id }); // Ensure typing stops
+            socket.emit('typing-stop', { senderId: user._id, receiverId: chatTarget._id });
 
             setMessages(prev => [...prev, savedMessage.data]);
             setMessageInput('');
@@ -336,23 +353,21 @@ const Chat = () => {
         u.username.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    // --- UTILITY ---
     const createEmojiWallpaper = (emoji) => {
         if (!emoji) return 'none';
-        // Create a subtle SVG pattern with the user's emoji
+        if (emoji.startsWith('/') || emoji.startsWith('http')) return 'none';
+
         const svg = `
             <svg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'>
                 <text x='40' y='40' dominant-baseline='middle' text-anchor='middle' font-size='24' opacity='0.05' font-family='Arial'>
                     ${emoji}
                 </text>
             </svg>
-        `.trim().replace(/\s+/g, ' '); // Minify slightly
+        `.trim().replace(/\s+/g, ' ');
         return `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}")`;
     };
 
-    // State for Profile Editing
     const [isEditingEmoji, setIsEditingEmoji] = useState(false);
-    const [selectedEmoji, setSelectedEmoji] = useState(user?.avatar || '😎');
 
     const handleUpdateProfile = async (newEmoji) => {
         try {
@@ -362,15 +377,12 @@ const Chat = () => {
                 avatarType: 'emoji'
             }, config);
 
-            // Update local storage and state
             const updatedUser = { ...user, avatar: newEmoji };
-            localStorage.setItem('userInfo', JSON.stringify({ ...updatedUser, token })); // Keep token
+            localStorage.setItem('userInfo', JSON.stringify({ ...updatedUser, token }));
             dispatch({ type: 'LOGIN_SUCCESS', payload: { ...updatedUser, token } });
-
             setIsEditingEmoji(false);
         } catch (error) {
-            console.error('Failed to update profile:', error);
-            alert('Failed to update emoji.');
+            console.error('Failed to update:', error);
         }
     };
 
@@ -378,7 +390,7 @@ const Chat = () => {
 
     return (
         <div className="chat-app-container">
-            {/* 💡 PROFILE MODAL OVERLAY */}
+            {/* PROFILE MODAL */}
             <AnimatePresence>
                 {isProfileOpen && (
                     <motion.div
@@ -398,8 +410,8 @@ const Chat = () => {
                             <div className="profile-body">
                                 {!isEditingEmoji ? (
                                     <>
-                                        <motion.div whileHover={{ scale: 1.1 }} className="profile-avatar-large" style={{ fontSize: '64px' }}>
-                                            {user?.avatarType === 'emoji' ? user.avatar : getInitials(user?.username)}
+                                        <motion.div whileHover={{ scale: 1.1 }} className="profile-avatar-large" style={{ fontSize: '64px', overflow: 'hidden' }}>
+                                            <AvatarDisplay user={user} size="large" />
                                         </motion.div>
 
                                         <div className="profile-detail">
@@ -407,8 +419,10 @@ const Chat = () => {
                                             <p>{user?.username}</p>
                                         </div>
                                         <div className="profile-detail">
-                                            <label>Theme Emoji</label>
-                                            <div style={{ fontSize: '24px', opacity: 0.7 }}>{user?.avatar}</div>
+                                            <label>Theme Emoji / Avatar</label>
+                                            <div style={{ fontSize: '24px', opacity: 0.7 }}>
+                                                {user?.avatarType === 'image' ? 'Character Avatar' : user?.avatar}
+                                            </div>
                                         </div>
 
                                         <div className="button-group-vertical" style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
@@ -435,6 +449,9 @@ const Chat = () => {
                                                 </button>
                                             ))}
                                         </div>
+                                        <button onClick={() => { setIsEditingEmoji(false); navigate('/set-avatar'); }} style={{ marginTop: '16px', color: '#667eea', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                                            Switch to Character Avatar
+                                        </button>
                                         <button onClick={() => setIsEditingEmoji(false)} style={{ marginTop: '16px', color: '#718096', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Cancel</button>
                                     </div>
                                 )}
@@ -448,12 +465,10 @@ const Chat = () => {
             <div className="chat-list-panel">
                 <div className="chat-list-header">
                     <div className="header-title-row">
-                        {/* 💡 Clickable Avatar for Profile */}
-                        <div className="user-avatar-small" onClick={() => setIsProfileOpen(true)} title="View Profile" style={{ cursor: 'pointer', marginRight: '10px', width: '35px', height: '35px', borderRadius: '50%', background: '#3182ce', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                            {user?.avatarType === 'emoji' ? user.avatar : getInitials(user?.username)}
+                        <div className="user-avatar-small" onClick={() => setIsProfileOpen(true)} title="View Profile" style={{ cursor: 'pointer', marginRight: '10px', width: '35px', height: '35px', borderRadius: '50%', background: '#3182ce', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', overflow: 'hidden' }}>
+                            <AvatarDisplay user={user} size="small" />
                         </div>
                         <h2>Chats</h2>
-                        {/* Removed duplicate logout button here, kept in profile */}
                         <button className="more-btn" onClick={() => setIsProfileOpen(true)} title="Settings"><FaEllipsisH /></button>
                     </div>
                     <div className="search-box">
@@ -475,9 +490,8 @@ const Chat = () => {
                             className={`chat-list-item ${chatTarget?._id === targetUser._id ? 'active' : ''}`}
                             onClick={() => selectChatTarget(targetUser)}
                         >
-                            <div className="chat-avatar">
-                                {/* Use emoji if available, else initials */}
-                                {targetUser.avatarType === 'emoji' && targetUser.avatar ? targetUser.avatar : getInitials(targetUser.username)}
+                            <div className="chat-avatar" style={{ overflow: 'hidden' }}>
+                                <AvatarDisplay user={targetUser} />
                                 {targetUser.isOnline && <span className="online-indicator"></span>}
                             </div>
                             <div className="chat-info">
@@ -498,18 +512,35 @@ const Chat = () => {
             <div className="main-chat-area">
                 {!chatTarget ? (
                     <div className="no-chat-selected">
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                            <FaComments size={64} style={{ color: '#cbd5e0' }} />
-                            <h3>Welcome {user?.username}</h3>
-                            <p>Select a conversation to start messaging</p>
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ duration: 0.5 }}
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+                        >
+                            {/* Floating Illustration */}
+                            <motion.div
+                                animate={{ y: [0, -15, 0] }}
+                                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                                style={{
+                                    fontSize: '80px',
+                                    marginBottom: '20px',
+                                    filter: 'drop-shadow(0 10px 20px rgba(0,0,0,0.1))'
+                                }}
+                            >
+                                🪐
+                            </motion.div>
+
+                            <h3>Welcome, {user?.username}!</h3>
+                            <p>Explore the universe of conversations.<br />Select a chat to begin.</p>
                         </motion.div>
                     </div>
                 ) : (
                     <>
                         <div className="chat-area-header">
                             <div className="header-user-info">
-                                <div className="chat-avatar large">
-                                    {chatTarget.avatarType === 'emoji' && chatTarget.avatar ? chatTarget.avatar : getInitials(chatTarget.username)}
+                                <div className="chat-avatar large" style={{ overflow: 'hidden' }}>
+                                    <AvatarDisplay user={chatTarget} size="large" />
                                     <span className="online-indicator"></span>
                                 </div>
                                 <div><h3>{chatTarget.username}</h3><div className="status-text">{chatTarget.isOnline ? 'Online' : 'Offline'}</div></div>
@@ -517,11 +548,10 @@ const Chat = () => {
                             <button className="more-btn"><FaEllipsisH size={20} /></button>
                         </div>
 
-                        {/* 💡 Messages Container with Dynamic Emoji Wallpaper */}
                         <div
                             className="messages-container"
                             style={{
-                                backgroundImage: createEmojiWallpaper(user?.avatar || '😎'), // 💡 APPLY WALLPAPER
+                                backgroundImage: createEmojiWallpaper(user?.avatar || '😎'),
                             }}
                         >
                             <AnimatePresence>
@@ -535,7 +565,11 @@ const Chat = () => {
                                             transition={{ duration: 0.2 }}
                                             className={`message-row ${isSent ? 'sent' : 'received'}`}
                                         >
-                                            {!isSent && <div className="message-avatar">{getInitials(chatTarget.username)}</div>}
+                                            {!isSent && (
+                                                <div className="message-avatar" style={{ overflow: 'hidden' }}>
+                                                    <AvatarDisplay user={chatTarget} size="tiny" />
+                                                </div>
+                                            )}
 
                                             <div className="message-content">
                                                 {msg.messageType === 'image' || msg.fileUrl ? (
@@ -552,7 +586,6 @@ const Chat = () => {
                                                     <span className="message-time">{formatTime(msg.createdAt)}</span>
                                                     {isSent && (
                                                         <span className="read-receipt" style={{ fontWeight: 'bold', color: msg.isRead ? '#63b3ed' : 'inherit' }}>
-                                                            {/* 💡 Double Tick for Sent/Read */}
                                                             {msg.isRead ? '✓✓' : '✓'}
                                                         </span>
                                                     )}
@@ -599,7 +632,7 @@ const Chat = () => {
                                     className="message-input-field"
                                     placeholder="Type a message..."
                                     value={messageInput}
-                                    onChange={handleTyping} // Uses handleTyping instead of direct set state
+                                    onChange={handleTyping}
                                 />
 
                                 <button

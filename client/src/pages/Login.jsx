@@ -1,8 +1,8 @@
-import { FaComments } from 'react-icons/fa';
 import React, { useState, useContext } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import authService from '../services/authService';
 import { AuthContext } from '../context/AuthContext';
+import { motion } from 'framer-motion';
 
 const Login = () => {
     const [formData, setFormData] = useState({
@@ -11,8 +11,6 @@ const Login = () => {
     });
 
     const { dispatch } = useContext(AuthContext);
-
-    // Destructuring formData is correct here
     const { email, password } = formData;
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -28,29 +26,17 @@ const Login = () => {
         setError(null);
         setIsLoading(true);
 
-        const userData = { email, password };
-
-        console.log("Submitting Data:", userData);
-
         try {
-            // 💡 CORRECTION: Pass the destructured variables directly for clarity
-            // Your original line was also correct, but this ensures we pass a clean object.
             const userData = { email, password };
-
-            // This is the core API call
             const response = await authService.login(userData);
 
             dispatch({
                 type: 'LOGIN_SUCCESS',
                 payload: { user: response, token: response.token }
             });
-
             navigate('/chat');
-            console.log("Login successful! Redirecting to chat.");
-
         } catch (err) {
-            const errorMessage =
-                err.response?.data?.message || 'Login failed. Invalid credentials or server error.';
+            const errorMessage = err.response?.data?.message || 'Login failed.';
             setError(errorMessage);
         } finally {
             setIsLoading(false);
@@ -58,56 +44,94 @@ const Login = () => {
     };
 
     return (
-        // 💡 WRAPPER 1: Main Auth Container (Crucial for background/centering)
         <div className="auth-page-container login-page">
+            <motion.div
+                className="login-split-card"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+            >
+                {/* LEFT PANEL: Illustration & Vibe */}
+                <div className="login-left">
+                    <motion.div
+                        initial={{ y: 20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: 0.2 }}
+                        style={{ fontSize: '80px', marginBottom: '20px' }}
+                    >
+                        ☁️
+                    </motion.div>
+                    <h2 style={{ fontFamily: 'Outfit', marginBottom: '10px' }}>Cirrus</h2>
+                    <p style={{ opacity: 0.9, lineHeight: '1.6', fontSize: '14px' }}>
+                        Where conversations float effortlessly.<br />Join the flow.
+                    </p>
 
-            {/* WRAPPER 2: The beautiful, translucent form box */}
-            <div className="form-container">
-
-                {/* Logo/Icon */}
-                {FaComments && <FaComments className="logo-icon" />}
-
-                <h2>{"PINSTAGRAM"}</h2>
-                <p>Welcome Back! Connect in real-time</p>
-
-                {/* Tab-Style Button Group */}
-                <div className="button-group">
-                    {/* Login Button (Active) */}
-                    <button type="button" disabled style={{ flex: 1 }}>Sign In</button>
-                    {/* Register Button (Inactive) */}
-                    <Link to="/register" style={{ flex: 1 }}>
-                        <button type="button">Register</button>
-                    </Link>
+                    {/* Decorative Circles */}
+                    <div style={{
+                        position: 'absolute', bottom: -50, left: -50, width: 150, height: 150,
+                        background: 'rgba(255,255,255,0.1)', borderRadius: '50%'
+                    }} />
+                    <div style={{
+                        position: 'absolute', top: -30, right: -30, width: 100, height: 100,
+                        background: 'rgba(255,255,255,0.1)', borderRadius: '50%'
+                    }} />
                 </div>
 
-                {/* --- Form --- */}
-                <form onSubmit={onSubmit}>
-                    <input
-                        type="email"
-                        name="email"
-                        value={email}
-                        onChange={onChange}
-                        placeholder="Email"
-                        autoComplete="email"
-                        required
-                    />
-                    <input
-                        type="password"
-                        name="password"
-                        value={password}
-                        onChange={onChange}
-                        placeholder="Password"
-                        autoComplete="current-password"
-                        required
-                    />
-                    <button type="submit" disabled={isLoading}>
-                        {isLoading ? 'Signing In...' : 'Sign In'}
-                    </button>
-                </form>
+                {/* RIGHT PANEL: Form */}
+                <div className="login-right">
+                    <h2 className="login-brand-title">Cirrus</h2>
+                    <p className="login-welcome-text">Welcome back to Cirrus</p>
 
-                {/* --- Messages and Errors --- */}
-                {error && <p style={{ color: '#ff4d4f', marginTop: '10px' }}>{error}</p>}
-            </div>
+                    <form onSubmit={onSubmit}>
+                        <div className="line-input-wrapper">
+                            <label style={{ fontSize: '12px', color: '#a0aec0', fontWeight: '600' }}>Email Address</label>
+                            <input
+                                type="email"
+                                name="email"
+                                value={email}
+                                onChange={onChange}
+                                className="line-input"
+                                placeholder="name@example.com"
+                                required
+                            />
+                        </div>
+
+                        <div className="line-input-wrapper">
+                            <label style={{ fontSize: '12px', color: '#a0aec0', fontWeight: '600' }}>Password</label>
+                            <input
+                                type="password"
+                                name="password"
+                                value={password}
+                                onChange={onChange}
+                                className="line-input"
+                                placeholder="••••••••"
+                                required
+                            />
+                        </div>
+
+                        <div className="forgot-password">
+                            <a href="#">Forgot password?</a>
+                        </div>
+
+                        {error && <div style={{ color: 'red', fontSize: '13px', textAlign: 'center', marginBottom: '10px' }}>{error}</div>}
+
+                        <button type="submit" className="login-btn" disabled={isLoading}>
+                            {isLoading ? 'Signing In...' : 'Sign In'}
+                        </button>
+                    </form>
+
+                    <div className="login-divider">or</div>
+
+                    <button className="google-btn">
+                        <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="G" width="20" />
+                        Sign in with Google
+                    </button>
+
+                    <div className="create-account-link">
+                        New to Cirrus? <Link to="/register">Create Account</Link>
+                    </div>
+                </div>
+            </motion.div>
         </div>
     );
 };
