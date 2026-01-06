@@ -3,6 +3,8 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const path = require('path');
+const fs = require('fs');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const connectDB = require('./config/db');
@@ -192,9 +194,44 @@ io.on('connection', (socket) => {
 // --- 6. Health Check and Error Middleware ---
 
 // Health check (Replaces old Sample route)
-app.get('/', (req, res) => {
-    res.json({ message: 'PINSTAGRAM API is running' });
-});
+// --- Deployment Configuration ---
+if (process.env.NODE_ENV === 'production') {
+    // Set static folder
+    const staticPath = path.join(__dirname, '../client/dist');
+    console.log('Serving static files from:', staticPath);
+    try {
+        if (fs.existsSync(staticPath)) {
+            console.log('Contents of static folder:', fs.readdirSync(staticPath));
+        } else {
+            console.error('CRITICAL: Static folder does not exist:', staticPath);
+        }
+    } catch (err) {
+        console.error('Error checking static folder:', err);
+    }
+
+    app.use(express.static(staticPath));
+
+    // Handle any other endpoints (SPA Fallback)
+    // Using a simple middleware to bypass Express 5 strict routing/regex issues completely
+    app.use((req, res, next) => {
+        // Exclude API routes AND files (paths with dots) from fallback
+        if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.includes('.')) {
+            const indexPath = path.join(staticPath, 'index.html');
+            if (fs.existsSync(indexPath)) {
+                res.sendFile(indexPath);
+            } else {
+                console.error('CRITICAL: index.html missing at', indexPath);
+                res.status(404).send('Application not found (missing index.html)');
+            }
+        } else {
+            next();
+        }
+    });
+} else {
+    app.get('/', (req, res) => {
+        res.json({ message: 'PINSTAGRAM API is running' });
+    });
+}
 
 // Error Middleware (Must be after all routes)
 app.use(notFound);
